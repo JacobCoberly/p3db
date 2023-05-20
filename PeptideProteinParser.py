@@ -10,8 +10,8 @@ import sys
 import getopt
 
 #Need to do:
-#   Refactor (Rather important)
-#   Reformat for terminal
+#   Refactor
+#   Make fasta selection work better
 
 
 #This function is used to turn the input database fasta files into an actual database.
@@ -122,7 +122,7 @@ def findProteinID(inFile, row):
 
 #This function searches through available databases for matches to the proteinID
 #It returns a list of records that match (could be empty)
-def searchDatabases(proteinID):
+def searchDatabases(proteinID, customDatabase):
     Entrez.email = "cx9p9@umsystem.edu"
     result = []
     
@@ -141,16 +141,21 @@ def searchDatabases(proteinID):
         else:
             glymaID = glymaID + proteinList[1]                
         proteinID = glymaID
-        return searchDatabase(glymaID, customDatabase)
+        result = searchDatabase(glymaID, customDatabase)
+        if result is not None:
+            return result
+        return []
     
     #Check databases
-    if customDatabase != None:
+    if type(customDatabase) != None:
         try:
             #Check custom database first
             proteinID = proteinID.split('.')[0]
             result = searchDatabase(proteinID, customDatabase)
             if result is not None:
                 return result
+            else:
+                result = []
         except:
             pass
     
@@ -178,7 +183,7 @@ def searchDatabases(proteinID):
 
 #This function takes an input file path, and input database, and an output database
 #Writes everything to appropriate output files
-def findLocations(fname, inFile, db):
+def findLocations(fname, inFile, db, customDatabase):
     f = open(fname.removesuffix(".txt").removesuffix(".xlsx") + "_RECORD" + ".txt", "w")
     unfound = set()
     unparsed = set()
@@ -200,7 +205,7 @@ def findLocations(fname, inFile, db):
             continue
         
         #Find the protein in the database
-        record = searchDatabases(proteinID)
+        record = searchDatabases(proteinID, customDatabase)
         if len(record) == 0:
             #The protein could not be found in any database
             unfound.add(proteinID)
@@ -210,7 +215,7 @@ def findLocations(fname, inFile, db):
             #Must check every item in the list until one matches
             flag = False
             for x in record:
-                if searchProtein(f, db, proteinID, x, peptideSeq, i) != False:
+                if searchProtein(f, db, proteinID, x, peptideSeq, i) == True:
                     flag = True
             #There was no match
             if flag == False:
@@ -255,7 +260,7 @@ def searchProtein(f, db, proteinID, record, peptideSeq, line):
         string = string.removeprefix('[')
         db.loc[line, 'peptide_in_protein'] = string
         db.loc[line, 'verified_id'] = proteinID
-        #Add the peptide record to the special file
+        #Add the peptide record to the output fasta file
         f.write(">" + record.id + "|" + str(proteinID) + "\n")
         f.write(str(recordSeq) + "\n")
         return True
@@ -279,13 +284,13 @@ def verifyLocation(proteinID, peptideSeq, recordSeq, location):
     return False
 
 #This function runs the program on a specific file
-def parseFile(file):
+def parseFile(file, customDatabase):
     inFile = None
     #Attempt to read the given input file
     try:
         if(file[-4:] == ".txt"):
             inFile = pd.read_table(file)
-        elif(file[-5:] == ".xlsx"):
+        elif(file[-5:] == ".xlsx" or file[-4:] == ".xls"):
             inFile = pd.read_excel(file)
         else:
             print("Unrecognized file format. Try a '.txt' or '.xlsx' file.")
@@ -297,7 +302,7 @@ def parseFile(file):
         print(file, "could not be parsed.");
         return 0;
     #Ensure the input file is properly formatted
-    inFile = fixColumns(inFile)
+    #inFile = fixColumns(inFile)
 
     #Parse the input file
     db = pd.DataFrame(inFile, columns=['protein_id',
@@ -313,7 +318,7 @@ def parseFile(file):
                                        'MZ',
                                        'C',
                                        'Protein Description'])
-    db = findLocations(file, inFile, db)
+    db = findLocations(file, inFile, db, customDatabase)
     print("\tFinished parsing " + file + ".")
     #Remove needless information
     remaining_lines = clean(db)
@@ -418,23 +423,22 @@ def standardizeInput(db, inFile):
         
     return db
 
-customDatabase = None
-
-def main():
+def main(argv):
     try:
         opts, args = getopt.getopt(argv, "i:t:", ["input=", "type="])
     except getopt.GetoptError:
-        print("Unrecognized parameter."
+        print("Unrecognized parameter.")
         return
     
     input_file = None
+    customDatabase = None
     fasta = None
     
     #Apply options
     for opt, arg in opts:
         if opt in ("-i", "--input"):
             input_file = arg
-        elif opt in ("it", "--type"):
+        elif opt in ("-t", "--type"):
             fasta = arg
     if input_file == None:
         print("Input file must be specified.")
@@ -445,7 +449,8 @@ def main():
         customDatabase = createDatabase(fasta)
     
     #Parse the input file
-    remaining_lines = parseFile(input_file)
+    print("Parsing", input_file)
+    remaining_lines = parseFile(input_file, customDatabase)
     print("Successfully parsed", remaining_lines, "lines.")
 
 if __name__ == "__main__":
