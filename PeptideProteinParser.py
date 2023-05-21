@@ -8,6 +8,8 @@ import urllib.request
 from math import isnan
 import sys
 import getopt
+import concurrent.futures
+import threading
 
 #Need to do:
 #   Refactor
@@ -27,7 +29,7 @@ def createDatabase(file):
         for i in range(len(title)):
             title[i] = (title[i].split('='))[-1]
             title[i] = title[i].upper()
-        if file == "Gmax_508_Wm82.a4.v1.protein.fa":
+        if len(title) == 6:
             record.append(title[3])
             indexes.append(title[3])
             record.append(sequence)
@@ -52,7 +54,7 @@ def createDatabase(file):
     f.close()
     
     #Turn records into a dataframe
-    if file == "Gmax_508_Wm82.a4.v1.protein.fa":
+    if len(title) == 6:
         db = pd.DataFrame(records,
             index = indexes,
             columns=['Locus', 'Sequence'])
@@ -181,47 +183,16 @@ def searchDatabases(proteinID, customDatabase):
 
 #This function takes an input file path, and input database, and an output database
 #Writes everything to appropriate output files
-def findLocations(fname, inFile, db, customDatabase):
+def findLocations(fname, inFile, db, customDatabase, thread_count):
     f = open(fname.removesuffix(".txt").removesuffix(".xlsx") + "_RECORD" + ".txt", "w")
     unfound = set()
     unparsed = set()
     found = set()
     db = standardizeInput(db, inFile)
     #Iterate through every peptide-protein pair
-    for i in range(len(inFile)):
-        #Find the protein ID
-        proteinID = findProteinID(inFile, i)
-        
-        #Find and standardize the peptide sequence
-        peptideSeq = db['peptide'].iloc[i]
-        for character in peptideSeq:
-            if not character.isupper():
-                peptideSeq = peptideSeq.replace(character, '')
-        
-        #If it was previously unfound, skip it again
-        if proteinID in unfound or tuple([proteinID, peptideSeq]) in found:
-            continue
-        
-        #Find the protein in the database
-        record = searchDatabases(proteinID, customDatabase)
-        if len(record) == 0:
-            #The protein could not be found in any database
-            unfound.add(proteinID)
-            continue
-        else:
-            #The protein was found at least once
-            #Must check every item in the list until one matches
-            flag = False
-            for x in record:
-                if searchProtein(f, db, proteinID, x, peptideSeq, i) == True:
-                    flag = True
-            #There was no match
-            if flag == False:
-                unparsed.add(proteinID)
-                print(peptideSeq, "could not be found in", proteinID)
-            #There was a match
-            else:
-                found.add(tuple([proteinID, peptideSeq]))
+    lines = ((inFile, db, i, found, unfound, unparsed, f, customDatabase) for i in range(len(inFile)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
+        executor.map(parseLine, lines)
            
     f.close()
 
@@ -241,6 +212,58 @@ def findLocations(fname, inFile, db, customDatabase):
         f.close()
     print(len(unfound)+len(unparsed), "proteins failed.")
     return db
+
+lock = threading.Lock()
+
+#Parses a single line in a database.
+#Used for threading in findLocations (above).
+def parseLine(args):
+    inFile = args[0]
+    db = args[1]
+    i = args[2]
+    found = args[3]
+    unfound = args[4]
+    unparsed = args[5]
+    f = args[6]
+    customDatabase = args[7]
+
+    #Find the protein ID
+    proteinID = findProteinID(inFile, i)
+        
+    #Find and standardize the peptide sequence
+    peptideSeq = db['peptide'].iloc[i]
+    for character in peptideSeq:
+        if not character.isupper():
+            peptideSeq = peptideSeq.replace(character, '')
+
+    #If it was previously unfound, skip it again
+    if proteinID in unfound or tuple([proteinID, peptideSeq]) in found:
+        return
+
+    #Find the protein in the database
+    record = searchDatabases(proteinID, customDatabase)
+
+    lock.acquire()
+    if len(record) == 0:
+        #The protein could not be found in any database
+        unfound.add(proteinID)
+        lock.release()
+        return
+    else:
+        #The protein was found at least once
+        #Must check every item in the list until one matches
+        flag = False
+        for x in record:
+            if searchProtein(f, db, proteinID, x, peptideSeq, i) == True:
+                flag = True
+        #There was no match
+        if flag == False:
+            unparsed.add(proteinID)
+            print(peptideSeq, "could not be found in", proteinID)
+        #There was a match
+        else:
+            found.add(tuple([proteinID, peptideSeq]))
+    lock.release()
 
 #This function updates the peptide locations for a certain protein to the
 #appropriate values
@@ -282,7 +305,7 @@ def verifyLocation(proteinID, peptideSeq, recordSeq, location):
     return False
 
 #This function runs the program on a specific file
-def parseFile(file, customDatabase):
+def parseFile(file, customDatabase, thread_count):
     inFile = None
     #Attempt to read the given input file
     try:
@@ -316,7 +339,7 @@ def parseFile(file, customDatabase):
                                        'MZ',
                                        'C',
                                        'Protein Description'])
-    db = findLocations(file, inFile, db, customDatabase)
+    db = findLocations(file, inFile, db, customDatabase, thread_count)
     print("\tFinished parsing " + file + ".")
     #Remove needless information
     remaining_lines = clean(db)
@@ -424,7 +447,7 @@ def standardizeInput(db, inFile):
 
 def main(argv):
     try:
-        opts, args = getopt.getopt(argv, "i:t:", ["input=", "type="])
+        opts, args = getopt.getopt(argv, "i:f:t:", ["input=", "fasta=", "threads="])
     except getopt.GetoptError:
         print("Unrecognized parameter.")
         return
@@ -432,17 +455,26 @@ def main(argv):
     input_file = None
     customDatabase = None
     fasta = None
+    thread_count = 10
     
     #Apply options
     for opt, arg in opts:
         if opt in ("-i", "--input"):
             input_file = arg
-        elif opt in ("-t", "--type"):
+        elif opt in ("-f", "--fasta"):
             fasta = arg
+        elif opt in ("-t", "--threads"):
+            try:
+                thread_count = int(arg)
+            except ValueError:
+                print("Thread count must take an int. Using default value.")
 
     #Ensure an input file is specified
     if input_file == None:
         print("Input file must be specified. Use '-i' to choose an input file.")
+        return
+    if thread_count < 1:
+        print("Must have at least 1 thread.")
         return
 
     #Create the specified database
@@ -451,7 +483,7 @@ def main(argv):
     
     #Parse the input file
     print("Parsing", input_file)
-    remaining_lines = parseFile(input_file, customDatabase)
+    remaining_lines = parseFile(input_file, customDatabase, thread_count)
     print("Successfully parsed", remaining_lines, "lines.")
 
 if __name__ == "__main__":
