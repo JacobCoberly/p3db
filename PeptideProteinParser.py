@@ -6,14 +6,17 @@ from ast import literal_eval
 from urllib.error import HTTPError
 import urllib.request
 from math import isnan
+import sys
+import getopt
+import concurrent.futures
+import threading
 
 #Need to do:
-#   Refactor (Rather important)
-#   Reformat for terminal
+#   Refactor
+#   Make fasta selection work better
 
 
 #This function is used to turn the input database fasta files into an actual database.
-#In desparate need of refactoring
 def createDatabase(file):
     print("Creating database from file", file)
     f = open(file, "r")
@@ -27,18 +30,7 @@ def createDatabase(file):
             title[i] = (title[i].split('='))[-1]
             title[i] = title[i].upper()
         if len(title) == 6:
-            #MemoryError
             record.append(title[3])
-            #Transcript
-            record.append(title[2])
-            #Glyma
-            record.append(title[0])
-            #ID
-            record.append(title[4])
-            #annot-version
-            record.append(title[5])
-            #PACID
-            record.append(title[1])
             indexes.append(title[3])
             record.append(sequence)
             
@@ -60,11 +52,12 @@ def createDatabase(file):
         records.append(record)
             
     f.close()
+    
     #Turn records into a dataframe
     if len(title) == 6:
         db = pd.DataFrame(records,
             index = indexes,
-            columns=['Locus', 'Transcript', 'Glyma', 'ID', 'ANNOT-Version', 'PACID', 'Sequence'])
+            columns=['Locus', 'Sequence'])
     elif len(title) == 1 or len(title) == 4:
         db = pd.DataFrame(records,
             index = indexes,
@@ -77,12 +70,12 @@ def createDatabase(file):
 
 #This function searches through the given database and returns a series of records
 #A record is returned if it has the proper protein ID
-def searchDatabase(proteinID, db, column):
+def searchDatabase(proteinID, db):
     #Search for the id by Locus
     try:
         options = db.loc[[proteinID]]
     except:
-        return None
+        return []
 
     #option = options.iloc[0]
     possibleMatches = []
@@ -95,13 +88,7 @@ def searchDatabase(proteinID, db, column):
         record = SeqRecord.SeqRecord(Seq.Seq(sequence), id=ident)
         possibleMatches.append(record)
 
-    if len(possibleMatches) == 1:
-        return record
-    else:
-        return possibleMatches
-
-def isValid(char):
-    return char.isdigit()
+    return possibleMatches
 
 #This function takes two strings, string and sub, and returns all of the positions
 #in string where sub is located (where the first element is location 1).
@@ -115,6 +102,10 @@ def findSubstring(string, sub):
         if string[i : i+subLength] == sub:
             locations.append(i+1)
     return locations
+
+#Helper function for findProteinID
+def isValid(char):
+    return char.isdigit()
 
 #This function returns the protein ID found in a certain row in a given database
 def findProteinID(inFile, row):
@@ -132,23 +123,17 @@ def findProteinID(inFile, row):
     return proteinID
 
 #This function searches through available databases for matches to the proteinID
-#It returns either a record or a list of records that match
-def searchDatabases(proteinID):
+#It returns a list of records that match (could be empty)
+def searchDatabases(proteinID, customDatabase):
     Entrez.email = "cx9p9@umsystem.edu"
-    #Standard-format ids should be entirely numeric
-    if proteinID.isdigit():
-        try:
-            handle = Entrez.efetch(db="protein", id=proteinID, rettype="fasta")
-            record = SeqIO.read(handle, "fasta")
-            handle.close()
-            return record
-        except HTTPError:
-            print("\tHTTPError: Bad Request. Protein id",
-            proteinID,
-            "could not be found.")
-            return None
-    #GLYMA ids begin with the word 'GLYMA'
-    elif (proteinID[0:5]).upper() == "GLYMA":
+    result = []
+    
+    #Ensure GLYMA ids are properly formatted
+    #GLYMA ids aren't stored in either online database
+    if (proteinID[0:5]).upper() == "GLYMA":
+        if customDatabase == None:
+            return result
+        
         glymaID = 'GLYMA.'
         proteinList = proteinID.split('.')
         if proteinID[5].isdigit():
@@ -156,100 +141,69 @@ def searchDatabases(proteinID):
         elif proteinID[5] != '.':
             glymaID = glymaID + proteinList[0][6:]
         else:
-            glymaID = glymaID + proteinList[1]
-        column = 'Locus'                
-        return searchDatabase(glymaID, glymaDatabase, column)
-    #Some standard and nonstandard ids are letter-digit combos
-    else:
+            glymaID = glymaID + proteinList[1]                
+        proteinID = glymaID
+        result = searchDatabase(glymaID, customDatabase)
+        if len(result) > 0:
+            return result
+        return []
+    
+    #Check databases
+    if type(customDatabase) != None:
         try:
             #Check custom database first
-            column = 'Locus'
             proteinID = proteinID.split('.')[0]
-            result = searchDatabase(proteinID, customDatabase, column)
-            if result is not None:
+            result = searchDatabase(proteinID, customDatabase)
+            if len(result) > 0:
                 return result
         except:
             pass
-        try:
-            print("Custom database failed to locate", proteinID, ". Checking Uniprot.")
-            handle = urllib.request.urlopen("http://www.uniprot.org/uniprot/" + proteinID + ".xml")
-            record = SeqIO.read(handle, "uniprot-xml")
-            handle.close()
-            return record
-        except:
-            #print("Online database failed. Checking standard database.")
-            pass
-        #Attempt standard database
-        try:
-            print("Uniprot failed to locate", proteinID, ". Checking Standard.")
-            handle = Entrez.efetch(db="protein", id=proteinID, rettype="fasta")
-            record = SeqIO.read(handle, "fasta")
-            handle.close()
-            return record
-        except HTTPError:
-            #print("\tHTTPError: Bad Request. Protein id",
-            #proteinID,
-            #"could not be found.")
-            print("Protein", proteinID, "could not be found.")
-            return None
+    
+    try:
+        #Check Uniprot
+        handle = urllib.request.urlopen("http://www.uniprot.org/uniprot/" + proteinID + ".xml")
+        record = SeqIO.read(handle, "uniprot-xml")
+        handle.close()
+        result.append(record)
+        return result
+    except:
+        pass
+    
+    try:
+        #Check Entrez
+        handle = Entrez.efetch(db="protein", id=proteinID, rettype="fasta")
+        record = SeqIO.read(handle, "fasta")
+        handle.close()
+        result.append(record)
+        return result
+    except HTTPError:
+        pass
     print("Protein", proteinID, "could not be found.")
-    return None
+    return result
 
 #This function takes an input file path, and input database, and an output database
 #Writes everything to appropriate output files
-def findLocations(fname, inFile, db):
+def findLocations(fname, inFile, db, customDatabase, thread_count):
     f = open(fname.removesuffix(".txt").removesuffix(".xlsx") + "_RECORD" + ".txt", "w")
     unfound = set()
     unparsed = set()
     found = set()
     db = standardizeInput(db, inFile)
     #Iterate through every peptide-protein pair
-    for i in range(len(inFile)):
-        #Find the protein ID
-        proteinID = findProteinID(inFile, i)
-        
-        #Find and standardize the peptide sequence
-        peptideSeq = db['peptide'].iloc[i]
-        for character in peptideSeq:
-            if not character.isupper():
-                peptideSeq = peptideSeq.replace(character, '')
-        
-        #If it was previously unfound, skip it again
-        if proteinID in unfound or tuple([proteinID, peptideSeq]) in found:
-            continue
-        
-        #Find the protein in the database
-        record = searchDatabases(proteinID)
-        if record is None:
-            #print("The protein could not be found in any database.")
-            unfound.add(proteinID)
-            continue
-            #break
-        if type(record) != list:
-            recordSeq = record.seq
-            if searchProtein(f, db, proteinID, record, peptideSeq, i) == False:
-                unparsed.add(proteinID)
-                print(peptideSeq, "could not be found in", proteinID)
-        else:
-            #Must check every item in the list until one matches
-            flag = False
-            for x in record:
-                if searchProtein(f, db, proteinID, x, peptideSeq, i) != False:
-                    flag = True
-            if flag == False:
-                unparsed.add(proteinID)
-                print(peptideSeq, "could not be found in", proteinID)
-            else:
-                found.add(tuple([proteinID, peptideSeq]))
+    lines = ((inFile, db, i, found, unfound, unparsed, f, customDatabase) for i in range(len(inFile)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
+        executor.map(parseLine, lines)
            
     f.close()
-    
+
+    #Write the file for unfound proteins
     if len(unfound) != 0:
         f = open(fname.removesuffix(".txt") + "_UNFOUND" + ".txt", "w")
         for x in unfound:
             f.write(x)
             f.write("\n")
         f.close()
+    #Write the file for unparsed proteins
     if len(unparsed) != 0:
         f = open(fname.removesuffix(".txt").removesuffix("_UNFOUND") + "_UNPARSED" + ".txt", "w")
         for x in unparsed:
@@ -258,6 +212,58 @@ def findLocations(fname, inFile, db):
         f.close()
     print(len(unfound)+len(unparsed), "proteins failed.")
     return db
+
+lock = threading.Lock()
+
+#Parses a single line in a database.
+#Used for threading in findLocations (above).
+def parseLine(args):
+    inFile = args[0]
+    db = args[1]
+    i = args[2]
+    found = args[3]
+    unfound = args[4]
+    unparsed = args[5]
+    f = args[6]
+    customDatabase = args[7]
+
+    #Find the protein ID
+    proteinID = findProteinID(inFile, i)
+        
+    #Find and standardize the peptide sequence
+    peptideSeq = db['peptide'].iloc[i]
+    for character in peptideSeq:
+        if not character.isupper():
+            peptideSeq = peptideSeq.replace(character, '')
+
+    #If it was previously unfound, skip it again
+    if proteinID in unfound or tuple([proteinID, peptideSeq]) in found:
+        return
+
+    #Find the protein in the database
+    record = searchDatabases(proteinID, customDatabase)
+
+    lock.acquire()
+    if len(record) == 0:
+        #The protein could not be found in any database
+        unfound.add(proteinID)
+        lock.release()
+        return
+    else:
+        #The protein was found at least once
+        #Must check every item in the list until one matches
+        flag = False
+        for x in record:
+            if searchProtein(f, db, proteinID, x, peptideSeq, i) == True:
+                flag = True
+        #There was no match
+        if flag == False:
+            unparsed.add(proteinID)
+            print(peptideSeq, "could not be found in", proteinID)
+        #There was a match
+        else:
+            found.add(tuple([proteinID, peptideSeq]))
+    lock.release()
 
 #This function updates the peptide locations for a certain protein to the
 #appropriate values
@@ -275,13 +281,11 @@ def searchProtein(f, db, proteinID, record, peptideSeq, line):
         string = string.removeprefix('[')
         db.loc[line, 'peptide_in_protein'] = string
         db.loc[line, 'verified_id'] = proteinID
-        #Add the peptide record to the special file
+        #Add the peptide record to the output fasta file
         f.write(">" + record.id + "|" + str(proteinID) + "\n")
         f.write(str(recordSeq) + "\n")
         return True
     else:
-        #The peptide could not be found, make a note
-        #print(peptideSeq, "could not be found in", proteinID)
         return False
 
 #This function verifies whether or not a given peptide location is correct
@@ -300,87 +304,50 @@ def verifyLocation(proteinID, peptideSeq, recordSeq, location):
     #The given location is wrong
     return False
 
-#This function runs the program on a specific file in a specific directory
-def parseFile(directory, filename):
+#This function runs the program on a specific file
+def parseFile(file, customDatabase, thread_count):
     inFile = None
-    file = createFilePath(directory, filename)
-    if(file[-4:] == ".txt"):
-        inFile = translateFile(file)
-    elif(file[-5:] == ".xlsx"):
-        inFile = translateTable(file)
-        inFile = fixColumns(inFile)
-    
-    db = pd.DataFrame(inFile, columns=['protein_id', 'verified_id', 'version', 'peptide','detected_peptide', 'original_in_protein', 'peptide_in_protein', 'verified', 'MI', 'D', 'MZ', 'C', 'Protein Description'])
-    db = findLocations(file, inFile, db)
-    print("\tFinished parsing " + file + "\n")
+    #Attempt to read the given input file
+    try:
+        if(file[-4:] == ".txt"):
+            inFile = pd.read_table(file)
+        elif(file[-5:] == ".xlsx" or file[-4:] == ".xls"):
+            inFile = pd.read_excel(file)
+        else:
+            print("Unrecognized file format. Try a '.txt' or '.xlsx' file.")
+            return 0;
+    except FileNotFoundError:
+        print(file, "could not be found.")
+        return 0;
+    except ValueError:
+        print(file, "could not be parsed.");
+        return 0;
+    #Ensure the input file is properly formatted
+    #inFile = fixColumns(inFile)
+
+    #Parse the input file
+    db = pd.DataFrame(inFile, columns=['protein_id',
+                                       'verified_id',
+                                       'version',
+                                       'peptide',
+                                       'detected_peptide',
+                                       'original_in_protein',
+                                       'peptide_in_protein',
+                                       'verified',
+                                       'MI',
+                                       'D',
+                                       'MZ',
+                                       'C',
+                                       'Protein Description'])
+    db = findLocations(file, inFile, db, customDatabase, thread_count)
+    print("\tFinished parsing " + file + ".")
     #Remove needless information
     remaining_lines = clean(db)
     #Send to file
-    file = file.removesuffix(".txt") + ".xlsx"
+    file = file.removesuffix(".txt").removesuffix(".xlsx") + "_PARSED" + ".xlsx"
     db.to_excel(file, index=False)
+    #Return successful lines
     return remaining_lines
-
-
-def main():
-    if(filename != '*'):
-        parseFile(directory, filename)
-    else:
-        #Parse the entire directory
-        files = []
-        for r, d, f in os.walk(os.path.join('./data/', directory)):
-            files = f
-        #Files identified
-        count = len(files)
-        y = 0
-        #Remove bad files
-        for x in range(count):
-            if files[y][-11:] == "UNFOUND.txt" or \
-               files[y][-12:] == "UNPARSED.txt" or \
-               files[y][-10:] == "RECORD.txt" or \
-               files[y][-5:] == ".xlsx" or \
-               files[y] == ".DS_Store":
-                files.pop(y)
-                y = y-1
-            y = y+1
-        #Perform the calculations
-        results = open("table_sizes.txt", 'w')
-        for f in files:
-            remaining_lines = parseFile(directory, f)
-            results.write(f.split('_')[0])
-            results.write(" ")
-            results.write(str(remaining_lines))
-            results.write("\n")
-        results.close()
-            
-    print("All files parsed.")
-
-#This function creates a file path given the directory and filename
-def createFilePath(directory, filename):
-    return "./data/"+directory+"/"+filename
-
-#Takes a file path and turns the file at that location into a dataframe
-def translateFile(file):
-    try:
-        print("\tNow parsing " + file)
-        return pd.read_table(file)
-    except FileNotFoundError:
-        print("The file could not be found.")
-        return None
-    except ValueError:
-        print("The file could not be parsed.")
-        return None
-
-#Takes a file path and turns the file at that location into a dataframe
-def translateTable(file):
-    try:
-        print("\tNow parsing " + file)
-        return pd.read_excel(file)
-    except FileNotFoundError:
-        print("The file could not be found.")
-        return None
-    except ValueError:
-        print("The file could not be parsed.")
-        return None
 
 #Takes a database and removes empty columns and incomplete rows
 def clean(db):
@@ -396,6 +363,7 @@ def clean(db):
                 flag = True
     if flag:
         #There were no verified ids
+        print("This table has no valid pairs.")
         return 0;
     #Remove excess rows
     depth = 0 #actual position in the table
@@ -414,6 +382,7 @@ def clean(db):
 
 #This function takes a dataframe, read in from a file, that has nonstandard
 #column layout. It "fixed" the data to a more standardized format.
+#This function only exists because of Jatropha Curcas.
 def fixColumns(inFile):
     db = pd.DataFrame(columns=['protein_id', \
                                'verified_id', \
@@ -455,7 +424,7 @@ def fixColumns(inFile):
     return db
 
 #Simple standardization function that takes the fields in a database and
-#strips them
+#strips/formats them
 def standardizeInput(db, inFile):
     #Standardize the fields
     for i in range(len(inFile)):
@@ -468,7 +437,6 @@ def standardizeInput(db, inFile):
         try:
             db.loc[i, 'original_in_protein'] = str(inFile.loc[i, 'peptide_in_protein']).strip()
         except:
-            print("None 3")
             db.loc[i, 'original_in_protein'] = 'None'
         #Strip the protein id
         proteinID = findProteinID(inFile, i)
@@ -477,10 +445,46 @@ def standardizeInput(db, inFile):
         
     return db
 
-glymaDatabase = createDatabase("Gmax_508_Wm82.a4.v1.protein.fa")
-customDatabase = createDatabase("Athaliana_447_Araport11.protein.fa")
+def main(argv):
+    try:
+        opts, args = getopt.getopt(argv, "i:f:t:", ["input=", "fasta=", "threads="])
+    except getopt.GetoptError:
+        print("Unrecognized parameter.")
+        return
+    
+    input_file = None
+    customDatabase = None
+    fasta = None
+    thread_count = 10
+    
+    #Apply options
+    for opt, arg in opts:
+        if opt in ("-i", "--input"):
+            input_file = arg
+        elif opt in ("-f", "--fasta"):
+            fasta = arg
+        elif opt in ("-t", "--threads"):
+            try:
+                thread_count = int(arg)
+            except ValueError:
+                print("Thread count must take an int. Using default value.")
 
-directory = "Jatropha curcas"
-filename = '30626061.xlsx'
+    #Ensure an input file is specified
+    if input_file == None:
+        print("Input file must be specified. Use '-i' to choose an input file.")
+        return
+    if thread_count < 1:
+        print("Must have at least 1 thread.")
+        return
 
-main()
+    #Create the specified database
+    if(fasta != None):
+        customDatabase = createDatabase(fasta)
+    
+    #Parse the input file
+    print("Parsing", input_file)
+    remaining_lines = parseFile(input_file, customDatabase, thread_count)
+    print("Successfully parsed", remaining_lines, "lines.")
+
+if __name__ == "__main__":
+   main(sys.argv[1:])
