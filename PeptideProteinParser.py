@@ -73,7 +73,7 @@ def searchDatabase(proteinID, db):
     try:
         options = db.loc[[proteinID]]
     except:
-        return None
+        return []
 
     #option = options.iloc[0]
     possibleMatches = []
@@ -142,7 +142,7 @@ def searchDatabases(proteinID, customDatabase):
             glymaID = glymaID + proteinList[1]                
         proteinID = glymaID
         result = searchDatabase(glymaID, customDatabase)
-        if result is not None:
+        if len(result) > 0:
             return result
         return []
     
@@ -152,10 +152,8 @@ def searchDatabases(proteinID, customDatabase):
             #Check custom database first
             proteinID = proteinID.split('.')[0]
             result = searchDatabase(proteinID, customDatabase)
-            if result is not None:
+            if len(result) > 0:
                 return result
-            else:
-                result = []
         except:
             pass
     
@@ -361,6 +359,7 @@ def clean(db):
 
 #This function takes a dataframe, read in from a file, that has nonstandard
 #column layout. It "fixed" the data to a more standardized format.
+#This function only exists because of Jatropha Curcas.
 def fixColumns(inFile):
     db = pd.DataFrame(columns=['protein_id', \
                                'verified_id', \
@@ -440,8 +439,10 @@ def main(argv):
             input_file = arg
         elif opt in ("-t", "--type"):
             fasta = arg
+
+    #Ensure an input file is specified
     if input_file == None:
-        print("Input file must be specified.")
+        print("Input file must be specified. Use '-i' to choose an input file.")
         return
 
     #Create the specified database
