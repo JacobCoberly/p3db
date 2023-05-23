@@ -29,43 +29,24 @@ def createDatabase(file):
         for i in range(len(title)):
             title[i] = (title[i].split('='))[-1]
             title[i] = title[i].upper()
-        if len(title) == 6:
-            record.append(title[3])
-            indexes.append(title[3])
+        if title[0].split('.')[0] != 'GLYMA':
+            record.append(title[0].split('.')[0])
+            indexes.append(title[0].split('.')[0])
+            record.append(sequence)
+        else:
+            record.append('GLYMA.' + title[0].split('.')[1])
+            indexes.append('GLYMA.' + title[0].split('.')[1])
             record.append(sequence)
             
-        elif len(title) == 1:
-            record.append(title[0])
-            indexes.append(title[0])
-            record.append(sequence)
-            
-        elif len(title) == 4:
-            record.append(title[0])
-            indexes.append(title[0])
-            record.append(sequence)
-            
-        elif len(title) > 6:
-            record.append(title[0])
-            record.append(title[0][0:-2])
-            indexes.append(title[0][0:-2])
-            record.append(sequence)
         records.append(record)
             
     f.close()
     
     #Turn records into a dataframe
-    if len(title) == 6:
-        db = pd.DataFrame(records,
-            index = indexes,
-            columns=['Locus', 'Sequence'])
-    elif len(title) == 1 or len(title) == 4:
-        db = pd.DataFrame(records,
-            index = indexes,
-            columns=['Locus', 'Sequence'])
-    elif len(title) > 6:
-        db = pd.DataFrame(records,
-            index = indexes,
-            columns=['ID', 'Locus', 'Sequence'])
+    db = pd.DataFrame(records,
+                      index = indexes,
+                      columns=['Locus', 'Sequence'])
+
     return db
 
 #This function searches through the given database and returns a series of records
