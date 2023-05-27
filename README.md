@@ -19,7 +19,7 @@ The python code to parse peptide-protein pairs for P3DB. Development occurs in t
   &emsp; <b>C</b>.<br>
   &emsp; <b>Protein Description</b>.<br>
   If the input file is missing one or more of these columns, the corresponding output file will also lack them.<br>
-  The input file must always contain the <b>protein_id</b>, <b>peptide</b>, and <b>peptide_in_protein</b> columns.<br>
+  The input file must always contain the <b>protein_id</b> and <b>peptide</b> columns.<br>
 <br>
 <b>Additional Features:</b><br>
   Use <code>-t <i>number</i></code> to determine the number of threads (default 10). This can usually be left at its default value.
