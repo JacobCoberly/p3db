@@ -11,10 +11,7 @@ import getopt
 import concurrent.futures
 import threading
 
-#Need to do:
-#   Refactor
-#   Make fasta selection work better
-
+fasta_directory = "./2/googleDrive/"
 
 #This function is used to turn the input database fasta files into an actual database.
 def createDatabase(file):
@@ -29,43 +26,24 @@ def createDatabase(file):
         for i in range(len(title)):
             title[i] = (title[i].split('='))[-1]
             title[i] = title[i].upper()
-        if len(title) == 6:
-            record.append(title[3])
-            indexes.append(title[3])
+        if title[0].split('.')[0] != 'GLYMA':
+            record.append(title[0].split('.')[0])
+            indexes.append(title[0].split('.')[0])
+            record.append(sequence)
+        else:
+            record.append('GLYMA.' + title[0].split('.')[1])
+            indexes.append('GLYMA.' + title[0].split('.')[1])
             record.append(sequence)
             
-        elif len(title) == 1:
-            record.append(title[0])
-            indexes.append(title[0])
-            record.append(sequence)
-            
-        elif len(title) == 4:
-            record.append(title[0])
-            indexes.append(title[0])
-            record.append(sequence)
-            
-        elif len(title) > 6:
-            record.append(title[0])
-            record.append(title[0][0:-2])
-            indexes.append(title[0][0:-2])
-            record.append(sequence)
         records.append(record)
             
     f.close()
     
     #Turn records into a dataframe
-    if len(title) == 6:
-        db = pd.DataFrame(records,
-            index = indexes,
-            columns=['Locus', 'Sequence'])
-    elif len(title) == 1 or len(title) == 4:
-        db = pd.DataFrame(records,
-            index = indexes,
-            columns=['Locus', 'Sequence'])
-    elif len(title) > 6:
-        db = pd.DataFrame(records,
-            index = indexes,
-            columns=['ID', 'Locus', 'Sequence'])
+    db = pd.DataFrame(records,
+                      index = indexes,
+                      columns=['Locus', 'Sequence'])
+
     return db
 
 #This function searches through the given database and returns a series of records
@@ -447,7 +425,7 @@ def standardizeInput(db, inFile):
 
 def main(argv):
     try:
-        opts, args = getopt.getopt(argv, "i:f:t:", ["input=", "fasta=", "threads="])
+        opts, args = getopt.getopt(argv, "i:s:t:", ["Input=", "Species=", "Threads="])
     except getopt.GetoptError:
         print("Unrecognized parameter.")
         return
@@ -459,15 +437,33 @@ def main(argv):
     
     #Apply options
     for opt, arg in opts:
-        if opt in ("-i", "--input"):
+        if opt in ("-i", "--Input"):
             input_file = arg
-        elif opt in ("-f", "--fasta"):
-            fasta = arg
-        elif opt in ("-t", "--threads"):
+        elif opt in ("-s", "--Species"):
+            fasta = arg.lower()
+            #Turn the species into an actual fasta file
+            if fasta == 'arabidopsis':
+                fasta = fasta_directory + "Athaliana_447_Araport11.protein.fa"
+            elif fasta == 'gossypium':
+                fasta = fasta_directory + "Gossypium.fasta"
+            elif fasta == 'gmax':
+                fasta = fasta_directory + "Gmax_508_Wm82.a4.v1.protein.fa"
+            #Some species only use the online databases
+            elif fasta == 'brachypodium' or \
+                 fasta == 'citrus' or \
+                 fasta == 'hordeum' or \
+                 fasta == 'jatropha' or \
+                 fasta == 'cicer':
+                pass
+            else:
+                print("Unrecognized species.")
+                return
+        elif opt in ("-t", "--Threads"):
             try:
                 thread_count = int(arg)
             except ValueError:
-                print("Thread count must take an int. Using default value.")
+                print("Thread count must take an int.")
+                return
 
     #Ensure an input file is specified
     if input_file == None:
