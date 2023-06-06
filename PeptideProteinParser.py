@@ -293,30 +293,23 @@ def parseFile(file, customDatabase, thread_count):
             inFile = pd.read_excel(file)
         else:
             print("Unrecognized file format. Try a '.txt' or '.xlsx' file.")
-            return 0;
+            return 0
     except FileNotFoundError:
         print(file, "could not be found.")
-        return 0;
+        return 0
     except ValueError:
         print(file, "could not be parsed.");
-        return 0;
-    #Ensure the input file is properly formatted
-    #inFile = fixColumns(inFile)
+        return 0
 
     #Parse the input file
-    db = pd.DataFrame(inFile, columns=['protein_id',
-                                       'verified_id',
-                                       'version',
-                                       'peptide',
-                                       'detected_peptide',
-                                       'original_in_protein',
-                                       'peptide_in_protein',
-                                       'verified',
-                                       'MI',
-                                       'D',
-                                       'MZ',
-                                       'C',
-                                       'Protein Description'])
+    db = inFile
+    if 'protein_id' not in db:
+        print("'protein_id' column could not be found.")
+        return 0
+    elif  'peptide' not in db:
+        print("'peptide' column could not be found.")
+        return 0
+    
     db = findLocations(file, inFile, db, customDatabase, thread_count)
     print("\tFinished parsing " + file + ".")
     #Remove needless information
@@ -337,12 +330,10 @@ def clean(db):
            (column == 'verified' and db[column].values.all() == False) or \
            ("None" in set(db[column]))):
             db.drop(column, axis=1, inplace=True)
-            if column == 'verified_id':
-                flag = True
-    if flag:
+    if 'verified_id' not in db:
         #There were no verified ids
         print("This table has no valid pairs.")
-        return 0;
+        return;
     #Remove excess rows
     depth = 0 #actual position in the table
     index = 0 #index name in the table
@@ -357,49 +348,6 @@ def clean(db):
         depth=depth+1
         index=index+1
     return depth
-
-#This function takes a dataframe, read in from a file, that has nonstandard
-#column layout. It "fixed" the data to a more standardized format.
-#This function only exists because of Jatropha Curcas.
-def fixColumns(inFile):
-    db = pd.DataFrame(columns=['protein_id', \
-                               'verified_id', \
-                               'version', \
-                               'peptide', \
-                               'detected_peptide', \
-                               'original_in_protein', \
-                               'peptide_in_protein', \
-                               'verified', \
-                               'MI', \
-                               'D', \
-                               'MZ', \
-                               'C', \
-                               'Protein Description'])
-    for i in range(len(inFile)):
-        proteins = inFile.iloc[i].loc['Proteins'].split(';')
-        #originalLocs = str(inFile.iloc[i].loc['Positions within proteins']).split(';')
-        #Standardize peptide
-        peptideSeq = inFile['Modified sequence'].iloc[i]
-        ph = peptideSeq.replace('(ph)', '*')
-        for character in peptideSeq:
-            if not character.isupper():
-                peptideSeq = peptideSeq.replace(character, '')
-        for character in ph:
-            if not character.isupper() and not character == '*':
-                ph = ph.replace(character, '')
-
-        for j in range(len(proteins)):
-            proteins[j] = proteins[j].split('|')[-1]
-            #originalLocs[j] = int(float(originalLocs[j]))
-
-            row = {'protein_id':proteins[j], \
-                   'peptide':peptideSeq, \
-                   'detected_peptide':ph, \
-                   'original_in_protein':'_', \
-                   'C':inFile.iloc[i].loc['Charge']}
-            db.loc[len(db.index)] = row
-    
-    return db
 
 #Simple standardization function that takes the fields in a database and
 #strips/formats them
@@ -423,9 +371,25 @@ def standardizeInput(db, inFile):
         
     return db
 
+def helpMenu():
+    print("Instructions:\n")
+    print("  --Input (abbreviated -i):")
+    print("    Required parameter that specifies the path to the file to be parsed.\n")
+    print("  --Species (abbreviated -s):")
+    print("    Optional parameter that specifies the species file to compare against.")
+    print("    Recognized species:")
+    print("      Arabidopsis (ara)")
+    print("      Gossypium (gos)")
+    print("      Glycine (gmax)")
+    print("      Brachypodium (bra)")
+    print("      Citrus (cit)")
+    print("      Hordeum (hor)")
+    print("      Jatropha (jat)")
+    print("      Cicer (cic)\n")
+
 def main(argv):
     try:
-        opts, args = getopt.getopt(argv, "i:s:t:", ["Input=", "Species=", "Threads="])
+        opts, args = getopt.getopt(argv, "i:s:t:h", ["Input=", "Species=", "Threads=", "Help"])
     except getopt.GetoptError:
         print("Unrecognized parameter.")
         return
@@ -437,23 +401,26 @@ def main(argv):
     
     #Apply options
     for opt, arg in opts:
-        if opt in ("-i", "--Input"):
+        if opt in ("-h", "--Help"):
+            helpMenu()
+            return
+        elif opt in ("-i", "--Input"):
             input_file = arg
         elif opt in ("-s", "--Species"):
             fasta = arg.lower()
             #Turn the species into an actual fasta file
-            if fasta == 'arabidopsis':
+            if fasta == 'arabidopsis' or fasta == 'ara':
                 fasta = fasta_directory + "Athaliana_447_Araport11.protein.fa"
-            elif fasta == 'gossypium':
+            elif fasta == 'gossypium' or fasta == 'gos':
                 fasta = fasta_directory + "Gossypium.fasta"
-            elif fasta == 'gmax':
+            elif fasta == 'glycine' or fasta == 'gmax':
                 fasta = fasta_directory + "Gmax_508_Wm82.a4.v1.protein.fa"
             #Some species only use the online databases
-            elif fasta == 'brachypodium' or \
-                 fasta == 'citrus' or \
-                 fasta == 'hordeum' or \
-                 fasta == 'jatropha' or \
-                 fasta == 'cicer':
+            elif fasta == 'brachypodium' or fasta == 'bra' or \
+                 fasta == 'citrus' or fasta == 'cit' or \
+                 fasta == 'hordeum' or fasta == 'hor' or \
+                 fasta == 'jatropha' or fasta == 'jat' or \
+                 fasta == 'cicer' or fasta == 'cic':
                 pass
             else:
                 print("Unrecognized species.")
