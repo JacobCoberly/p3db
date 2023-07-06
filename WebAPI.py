@@ -1,8 +1,13 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template
 import PeptideProteinParser
 import requests
+import csv
 
 app = Flask(__name__)
+
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    return render_template('index.html')
 
 @app.route("/parse", methods=['POST'])
 def process():
@@ -22,7 +27,40 @@ def process():
 
     #Parse the file
     PeptideProteinParser.main(["-i", input_file, "-s", species])
-    return send_file(output_filepath, as_attachment=True)
+    #return send_file(output_filepath, as_attachment=True)
+
+    #Return limited number of lines
+    line_count = 5
+    rows = []
+    with open(output_filepath, 'r') as csvfile:
+        csvreader = csv.reader(csvfile)
+        headers = next(csvreader)
+        i = 0
+        for row in csvreader:
+            if i < line_count:
+                rows.append(row)
+            i = i+1
+            
+    # Generate the HTML table
+    table_html = '<table>'
+    
+    # Create the table header
+    table_html += '<tr>'
+    for header in headers:
+        table_html += f'<th>{header}</th>'
+    table_html += '</tr>'
+    
+    # Add the table rows
+    for row in rows:
+        table_html += '<tr>'
+        for value in row:
+            table_html += f'<td>{value}</td>'
+        table_html += '</tr>'
+    
+    table_html += '</table>'
+    
+    # Return the HTML response
+    return table_html
 
 @app.route("/upload", methods=['POST'])
 def processTwo():
@@ -31,14 +69,10 @@ def processTwo():
     
     if not file_data:
         return jsonify({'error': 'File data was not uploaded'})
-    elif not misc_data:
-        return jsonify({'error': 'File metadata was not uploaded'})
     elif 'input_file' not in file_data:
         return jsonify({'error': "File data does not include 'input_file' field"})
-    elif 'input_file' not in misc_data:
-        return jsonify({'error': "File metadata does not include 'input_file' field"})
 
-    file_name = misc_data.get("input_file")
+    file_name = file_data.get("input_file").filename
     species = None
     species = misc_data.get("species")
 
