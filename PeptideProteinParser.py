@@ -162,7 +162,7 @@ def searchDatabases(proteinID, customDatabase):
 #This function takes an input file path, and input database, and an output database
 #Writes everything to appropriate output files
 def findLocations(fname, inFile, db, customDatabase, thread_count):
-    f = open(fname.removesuffix(".txt").removesuffix(".xlsx") + "_RECORD" + ".txt", "w")
+    f = open(fname.split(".")[0] + "_RECORD" + ".txt", "w")
     unfound = set()
     unparsed = set()
     found = set()
@@ -176,14 +176,14 @@ def findLocations(fname, inFile, db, customDatabase, thread_count):
 
     #Write the file for unfound proteins
     if len(unfound) != 0:
-        f = open(fname.removesuffix(".txt") + "_UNFOUND" + ".txt", "w")
+        f = open(fname.split(".")[0] + "_UNFOUND" + ".txt", "w")
         for x in unfound:
             f.write(x)
             f.write("\n")
         f.close()
     #Write the file for unparsed proteins
     if len(unparsed) != 0:
-        f = open(fname.removesuffix(".txt").removesuffix("_UNFOUND") + "_UNPARSED" + ".txt", "w")
+        f = open(fname.split(".")[0].removesuffix("_UNFOUND") + "_UNPARSED" + ".txt", "w")
         for x in unparsed:
             f.write(x)
             f.write("\n")
@@ -291,8 +291,10 @@ def parseFile(file, customDatabase, thread_count):
             inFile = pd.read_table(file)
         elif(file[-5:] == ".xlsx" or file[-4:] == ".xls"):
             inFile = pd.read_excel(file)
+        elif(file[-4:] == ".csv"):
+            inFile = pd.read_scv(file)
         else:
-            print("Unrecognized file format. Try a '.txt' or '.xlsx' file.")
+            print("Unrecognized file format.")
             return 0
     except FileNotFoundError:
         print(file, "could not be found.")
@@ -315,8 +317,10 @@ def parseFile(file, customDatabase, thread_count):
     #Remove needless information
     remaining_lines = clean(db)
     #Send to file
-    file = file.removesuffix(".txt").removesuffix(".xlsx") + "_PARSED" + ".xlsx"
-    db.to_excel(file, index=False)
+    file = file.split(".")[0] + "_PARSED.csv"
+    #Move the output location to the location of the script
+    file = file.split("/")[-1]
+    db.to_csv(file, index=False)
     #Return successful lines
     return remaining_lines
 
@@ -333,6 +337,9 @@ def clean(db):
     if 'verified_id' not in db:
         #There were no verified ids
         print("This table has no valid pairs.")
+        #Clear the file
+        db.drop(db.index, inplace=True)
+
         return;
     #Remove excess rows
     depth = 0 #actual position in the table
@@ -421,7 +428,7 @@ def main(argv):
                  fasta == 'hordeum' or fasta == 'hor' or \
                  fasta == 'jatropha' or fasta == 'jat' or \
                  fasta == 'cicer' or fasta == 'cic':
-                pass
+                fasta = None
             else:
                 print("Unrecognized species.")
                 return
