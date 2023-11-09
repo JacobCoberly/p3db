@@ -28,12 +28,12 @@ def createDatabase(file):
             title[i] = title[i].upper()
         if title[0].split('.')[0] != 'GLYMA':
             record.append(title[0].split('.')[0])
-            indexes.append(title[0].split('.')[0])
-            record.append(sequence)
+            #indexes.append(title[0].split('.')[0])
         else:
             record.append('GLYMA.' + title[0].split('.')[1])
-            indexes.append('GLYMA.' + title[0].split('.')[1])
-            record.append(sequence)
+            #indexes.append('GLYMA.' + title[0].split('.')[1])
+        record.append(sequence)
+        record.append(file.split('/')[-1])
             
         records.append(record)
             
@@ -41,19 +41,31 @@ def createDatabase(file):
     
     #Turn records into a dataframe
     db = pd.DataFrame(records,
-                      index = indexes,
-                      columns=['Locus', 'Sequence'])
+                      #index = indexes,
+                      columns=['Locus', 'Sequence', 'Origin'])
 
     return db
+
+def combineFiles(path):
+    db = pd.DataFrame([], columns=['Locus', 'Sequence', 'Origin'])
+    for fname in os.listdir(path):
+        if(fname[-4:] == ".txt" or fname[-3:] == ".fa" or fname[-6:] == ".fasta"):
+            db = pd.concat([db, createDatabase(path+fname)], ignore_index=True)
+    return db
+        
 
 #This function searches through the given database and returns a series of records
 #A record is returned if it has the proper protein ID
 def searchDatabase(proteinID, db):
     #Search for the id by Locus
-    try:
-        options = db.loc[[proteinID]]
-    except:
-        return []
+    #try:
+        #options = db.loc[[proteinID]]
+        #print(proteinID, len(options), options, "\n")
+    #except Exception as e:
+        #print(e)
+        #return []
+
+    options = db[db['Locus'] == proteinID]
 
     #option = options.iloc[0]
     possibleMatches = []
@@ -65,6 +77,7 @@ def searchDatabase(proteinID, db):
         ident = option.loc['Locus']
         record = SeqRecord.SeqRecord(Seq.Seq(sequence), id=ident)
         possibleMatches.append(record)
+        possibleMatches.append(option.loc['Origin'])
 
     return possibleMatches
 
@@ -109,7 +122,7 @@ def searchDatabases(proteinID, customDatabase):
     #Ensure GLYMA ids are properly formatted
     #GLYMA ids aren't stored in either online database
     if (proteinID[0:5]).upper() == "GLYMA":
-        if customDatabase == None:
+        if type(customDatabase) == None:
             return result
         
         glymaID = 'GLYMA.'
@@ -143,6 +156,7 @@ def searchDatabases(proteinID, customDatabase):
         record = SeqIO.read(handle, "uniprot-xml")
         handle.close()
         result.append(record)
+        result.append("Uniprot")
         return result
     except:
         pass
@@ -153,6 +167,7 @@ def searchDatabases(proteinID, customDatabase):
         record = SeqIO.read(handle, "fasta")
         handle.close()
         result.append(record)
+        result.append("Entrez")
         return result
     except HTTPError:
         pass
@@ -204,18 +219,25 @@ def parseLine(args):
     unparsed = args[5]
     f = args[6]
     customDatabase = args[7]
+    #print("Beginning to parse line")
 
     #Find the protein ID
     proteinID = findProteinID(inFile, i)
+    #print(proteinID)
         
     #Find and standardize the peptide sequence
     peptideSeq = db['peptide'].iloc[i]
+    if peptideSeq == None or peptideSeq == "" or peptideSeq == "nan":
+        return
+    #peptideSeq = peptideSeq.upper()
     for character in peptideSeq:
         if not character.isupper():
             peptideSeq = peptideSeq.replace(character, '')
+    #print(proteinID, peptideSeq)
 
     #If it was previously unfound, skip it again
     if proteinID in unfound or tuple([proteinID, peptideSeq]) in found:
+        #print("Duplicate")
         return
 
     #Find the protein in the database
@@ -231,8 +253,9 @@ def parseLine(args):
         #The protein was found at least once
         #Must check every item in the list until one matches
         flag = False
-        for x in record:
-            if searchProtein(f, db, proteinID, x, peptideSeq, i) == True:
+        for x in range(len(record)):
+            if x % 2 == 0 and \
+               searchProtein(f, db, proteinID, record[x], record[x+1], peptideSeq, i) == True:
                 flag = True
         #There was no match
         if flag == False:
@@ -245,7 +268,7 @@ def parseLine(args):
 
 #This function updates the peptide locations for a certain protein to the
 #appropriate values
-def searchProtein(f, db, proteinID, record, peptideSeq, line):
+def searchProtein(f, db, proteinID, record, source, peptideSeq, line):
     recordSeq = record.seq
     
     #Check if there is a preexisting number to verify
@@ -259,6 +282,8 @@ def searchProtein(f, db, proteinID, record, peptideSeq, line):
         string = string.removeprefix('[')
         db.loc[line, 'peptide_in_protein'] = string
         db.loc[line, 'verified_id'] = proteinID
+        db.loc[line, 'reference_full_sequence'] = recordSeq
+        db.loc[line, 'reference_source'] = source
         #Add the peptide record to the output fasta file
         f.write(">" + record.id + "|" + str(proteinID) + "\n")
         f.write(str(recordSeq) + "\n")
@@ -292,7 +317,7 @@ def parseFile(file, customDatabase, thread_count):
         elif(file[-5:] == ".xlsx" or file[-4:] == ".xls"):
             inFile = pd.read_excel(file)
         elif(file[-4:] == ".csv"):
-            inFile = pd.read_scv(file)
+            inFile = pd.read_csv(file)
         else:
             print("Unrecognized file format.")
             return 0
@@ -329,18 +354,21 @@ def clean(db):
     flag = False
     #Remove excess columns
     for column in db:
-        if(db[column].isnull().values.all() == True or \
+        if((db[column].isnull().values.all() == True or \
            db[column].isna().values.all() == True or \
-           (column == 'verified' and db[column].values.all() == False) or \
-           ("None" in set(db[column]))):
+           #(column == 'verified' and db[column].values.all() == False) or \
+           ("None" in set(db[column]))) and \
+           column != 'verified'):
             db.drop(column, axis=1, inplace=True)
     if 'verified_id' not in db:
         #There were no verified ids
         print("This table has no valid pairs.")
         #Clear the file
         db.drop(db.index, inplace=True)
+        return 0;
+    if 'verified' not in db:
+        db['verified'] = None
 
-        return;
     #Remove excess rows
     depth = 0 #actual position in the table
     index = 0 #index name in the table
@@ -355,6 +383,7 @@ def clean(db):
         depth=depth+1
         index=index+1
     return depth
+    return 0
 
 #Simple standardization function that takes the fields in a database and
 #strips/formats them
@@ -404,6 +433,7 @@ def main(argv):
     input_file = None
     customDatabase = None
     fasta = None
+    path = None
     thread_count = 10
     
     #Apply options
@@ -417,11 +447,15 @@ def main(argv):
             fasta = arg.lower()
             #Turn the species into an actual fasta file
             if fasta == 'arabidopsis' or fasta == 'ara':
-                fasta = fasta_directory + "Athaliana_447_Araport11.protein.fa"
+                #fasta = fasta_directory + "Athaliana_447_Araport11.protein.fa"
+                fasta = fasta_directory + "Arabidopsis.fa"
+                path = "./2/googleDrive/arabidopsis/"
             elif fasta == 'gossypium' or fasta == 'gos':
                 fasta = fasta_directory + "Gossypium.fasta"
+                path = "./2/googleDrive/gossypium/"
             elif fasta == 'glycine' or fasta == 'gmax':
                 fasta = fasta_directory + "Gmax_508_Wm82.a4.v1.protein.fa"
+                path = "./2/googleDrive/gmax/"
             #Some species only use the online databases
             elif fasta == 'brachypodium' or fasta == 'bra' or \
                  fasta == 'citrus' or fasta == 'cit' or \
@@ -449,7 +483,8 @@ def main(argv):
 
     #Create the specified database
     if(fasta != None):
-        customDatabase = createDatabase(fasta)
+        #customDatabase = createDatabase(fasta)
+        customDatabase = combineFiles(path)
     
     #Parse the input file
     print("Parsing", input_file)
