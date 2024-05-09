@@ -12,6 +12,10 @@ import concurrent.futures
 import threading
 
 fasta_directory = "./2/googleDrive/"
+protein_id_column = 'protein_id'
+peptide_column = 'peptide'
+protein_id_column = 'Substrate'
+peptide_column = 'In_vitro_Peptides'
 
 #This function is used to turn the input database fasta files into an actual database.
 def createDatabase(file):
@@ -100,7 +104,7 @@ def isValid(char):
 
 #This function returns the protein ID found in a certain row in a given database
 def findProteinID(inFile, row):
-    string = str(inFile['protein_id'].iloc[row]).upper().strip()
+    string = str(inFile[protein_id_column].iloc[row]).upper().strip()
     #If there are multiple sections, take the second one
     if len(string.split('|')) > 1:
         proteinID = string.split('|')[1]
@@ -226,7 +230,7 @@ def parseLine(args):
     #print(proteinID)
         
     #Find and standardize the peptide sequence
-    peptideSeq = db['peptide'].iloc[i]
+    peptideSeq = db[peptide_column].iloc[i]
     if peptideSeq == None or peptideSeq == "" or peptideSeq == "nan":
         return
     #peptideSeq = peptideSeq.upper()
@@ -330,10 +334,10 @@ def parseFile(file, customDatabase, thread_count):
 
     #Parse the input file
     db = inFile
-    if 'protein_id' not in db:
+    if protein_id_column not in db:
         print("'protein_id' column could not be found.")
         return 0
-    elif  'peptide' not in db:
+    elif  peptide_column not in db:
         print("'peptide' column could not be found.")
         return 0
     
@@ -358,7 +362,8 @@ def clean(db):
            db[column].isna().values.all() == True or \
            #(column == 'verified' and db[column].values.all() == False) or \
            ("None" in set(db[column]))) and \
-           column != 'verified'):
+           column != 'verified' and \
+           column != 'Experiments_ID'):
             db.drop(column, axis=1, inplace=True)
     if 'verified_id' not in db:
         #There were no verified ids
@@ -375,11 +380,11 @@ def clean(db):
     pairs = set()
     while depth < len(db):
         if pd.isna(db.iloc[depth].loc['verified_id']) or \
-           tuple([db.iloc[depth].loc['protein_id'], db.iloc[depth].loc['peptide']]) in pairs:
+           tuple([db.iloc[depth].loc[protein_id_column], db.iloc[depth].loc[peptide_column]]) in pairs:
             db.drop(index, axis=0, inplace=True)
             depth=depth-1
         else:
-            pairs.add(tuple([db.iloc[depth].loc['protein_id'], db.iloc[depth].loc['peptide']]))
+            pairs.add(tuple([db.iloc[depth].loc[protein_id_column], db.iloc[depth].loc[peptide_column]]))
         depth=depth+1
         index=index+1
     return depth
@@ -392,9 +397,9 @@ def standardizeInput(db, inFile):
     for i in range(len(inFile)):
         #Strip the peptide
         try:
-            db.loc[i, 'peptide'] = str(inFile.loc[i, 'peptide']).strip()
+            db.loc[i, peptide_column] = str(inFile.loc[i, peptide_column]).strip()
         except:
-            db.loc[i, 'peptide'] = '_'
+            db.loc[i, peptide_column] = '_'
         #Strip the peptide in protein
         try:
             db.loc[i, 'original_in_protein'] = str(inFile.loc[i, 'peptide_in_protein']).strip()
@@ -402,8 +407,8 @@ def standardizeInput(db, inFile):
             db.loc[i, 'original_in_protein'] = 'None'
         #Strip the protein id
         proteinID = findProteinID(inFile, i)
-        if(inFile.loc[i, 'protein_id'] != proteinID):
-            db.loc[i, 'protein_id'] = proteinID
+        if(inFile.loc[i, protein_id_column] != proteinID):
+            db.loc[i, protein_id_column] = proteinID
         
     return db
 
