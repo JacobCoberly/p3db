@@ -1,6 +1,7 @@
 # P3DB Peptide-Protein Parser
 
-The python code to parse peptide-protein pairs for P3DB. Development occurs in the beta branch until testing confirms that it works as expected, at which point it is pushed to the main branch.
+The python code to parse peptide-protein pairs for P3DB. Development occurs in the beta branch until testing confirms that it works as expected, at which point it is pushed to the main branch.<br><br>
+***Make sure to update the fasta_directory parameter in the main file before attempting to run this program. It should be set to a directory which contains your local reference files.***
 
 ## Terminal Instructions:
   Call the script using <code>python PeptideProteinParser.py -i <i>input_file</i></code> in the terminal.<br>
