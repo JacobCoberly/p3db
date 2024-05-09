@@ -11,7 +11,10 @@ import getopt
 import concurrent.futures
 import threading
 
+#THIS IS THE DIRECTORY WHERE YOU PUT THE REFERENCE FASTA FILES!
+#MAKE SURE TO UPDATE THIS WHEN DOWNLOADING TO A NEW COMPUTER!
 fasta_directory = "./2/googleDrive/"
+
 protein_id_column = 'protein_id'
 peptide_column = 'peptide'
 protein_id_column = 'Substrate'
