@@ -27,3 +27,12 @@ The python code to parse peptide-protein pairs for P3DB. Development occurs in t
   &emsp; The request must include an 'input_file' field uploaded to <b>data</b>, which contains the name of the file.<br>
   &emsp; Optionally, the request may include a 'species' field uploaded to <b>data</b>, which describes the species of the file.<br>
   An example query can be found in the WebTest.py file.<br>
+
+## Output:
+The program will output up to four files.<br>
+<br>
+The <b>_PARSED</b> file contains all successfully parsed data in the proper format. This is the only file returned by the API.<br>
+The <b>_RECORD</b> file lists off used proteins and their full sequences. In more recent iterations, this is largely superfluous as the same data is stored in the _PARSED file.<br>
+The <b>_UNFOUND</b> file lists off all proteins for which a sequence could not be found in any database.<br>
+The <b>_UNPARSED</b> file lists off all proteins for which a sequence was found, but the corresponding peptide could not.<br>
+The program will not create a file if that file would be empty (i.e., if all proteins were found, there will not be an _UNFOUND file).
